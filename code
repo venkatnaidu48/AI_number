@@ -1,0 +1,108 @@
+import os
+import openai
+import json
+import time
+from fastapi import FastAPI, HTTPException
+from twilio.rest import Client
+from google.cloud import texttospeech, speech
+from pydantic import BaseModel
+
+# Initialize FastAPI
+app = FastAPI()
+
+# Twilio Credentials (Replace with your credentials)
+TWILIO_ACCOUNT_SID = "your_twilio_sid"
+TWILIO_AUTH_TOKEN = "your_twilio_auth_token"
+TWILIO_PHONE_NUMBER = "your_twilio_phone_number"
+
+client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+
+# OpenAI API Key (Replace with your API Key)
+OPENAI_API_KEY = "your_openai_api_key"
+openai.api_key = OPENAI_API_KEY
+
+# Google Cloud TTS Client
+tts_client = texttospeech.TextToSpeechClient()
+stt_client = speech.SpeechClient()
+
+# Store active calls
+active_calls = {}
+
+# Input format
+class CallRequest(BaseModel):
+    customer_number: str
+    script: str  # Initial script for AI to speak (e.g., course promotion)
+
+
+@app.post("/call_customer/")
+async def call_customer(request: CallRequest):
+    """ Initiates a call to a customer using Twilio """
+    try:
+        call = client.calls.create(
+            to=request.customer_number,
+            from_=TWILIO_PHONE_NUMBER,
+            url="http://your-server.com/voice_response",  # TwiML URL
+        )
+        active_calls[call.sid] = request.script
+        return {"message": "Call initiated", "call_sid": call.sid}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/voice_response/")
+async def voice_response(call_sid: str, speech_text: str):
+    """ Handles responses during a live call """
+    try:
+        # Generate AI response
+        ai_response = generate_ai_response(speech_text)
+
+        # Convert AI response to speech
+        audio_url = generate_speech(ai_response)
+
+        return {"message": "AI response sent", "audio_url": audio_url}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def generate_ai_response(user_input: str) -> str:
+    """ Uses GPT to generate a response """
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": user_input}]
+    )
+    return response["choices"][0]["message"]["content"]
+
+
+def generate_speech(text: str) -> str:
+    """ Converts AI response text to speech using Google TTS """
+    synthesis_input = texttospeech.SynthesisInput(text=text)
+    voice = texttospeech.VoiceSelectionParams(
+        language_code="en-IN", ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL
+    )
+    audio_config = texttospeech.AudioConfig(audio_encoding=texttospeech.AudioEncoding.MP3)
+    response = tts_client.synthesize_speech(input=synthesis_input, voice=voice, audio_config=audio_config)
+
+    # Save audio file
+    filename = f"response_{int(time.time())}.mp3"
+    with open(filename, "wb") as out:
+        out.write(response.audio_content)
+
+    return filename  # You need to host the file for Twilio to access
+
+
+@app.post("/process_audio/")
+async def process_audio(audio_file: str):
+    """ Converts customer speech to text using Google STT """
+    with open(audio_file, "rb") as f:
+        audio_content = f.read()
+
+    audio = speech.RecognitionAudio(content=audio_content)
+    config = speech.RecognitionConfig(encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16, language_code="en-IN")
+
+    response = stt_client.recognize(config=config, audio=audio)
+    return response.results[0].alternatives[0].transcript if response.results else "Could not understand"
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
