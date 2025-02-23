@@ -7,28 +7,27 @@ from twilio.rest import Client
 from google.cloud import texttospeech, speech
 from pydantic import BaseModel
 
-# Initialize FastAPI
 app = FastAPI()
 
-# Twilio Credentials (Replace with your credentials)
+
 TWILIO_ACCOUNT_SID = "your_twilio_sid"
 TWILIO_AUTH_TOKEN = "your_twilio_auth_token"
 TWILIO_PHONE_NUMBER = "your_twilio_phone_number"
 
 client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
-# OpenAI API Key (Replace with your API Key)
+
 OPENAI_API_KEY = "your_openai_api_key"
 openai.api_key = OPENAI_API_KEY
 
-# Google Cloud TTS Client
+
 tts_client = texttospeech.TextToSpeechClient()
 stt_client = speech.SpeechClient()
 
-# Store active calls
+
 active_calls = {}
 
-# Input format
+
 class CallRequest(BaseModel):
     customer_number: str
     script: str  # Initial script for AI to speak (e.g., course promotion)
